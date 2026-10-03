@@ -79,7 +79,7 @@ export default function ProfileScreen() {
   const { state, setName, setAvatarUri, setBody } = useAppData();
   const { profile, body } = state;
 
-  const commitNumber = (key: 'weightKg' | 'heightCm') => (raw: string) => {
+  const commitNumber = (key: 'weightKg' | 'heightCm' | 'age') => (raw: string) => {
     const n = parseFloat(raw.replace(',', '.'));
     if (!Number.isNaN(n) && n > 0) setBody({ [key]: Math.round(n * 10) / 10 });
   };
@@ -174,8 +174,38 @@ export default function ProfileScreen() {
                 />
               </View>
             </View>
+            <View style={styles.bodyRow}>
+              <View style={{ flex: 1 }}>
+                <TextField
+                  label="Age"
+                  value={String(body.age)}
+                  keyboardType="numeric"
+                  suffix="yrs"
+                  onCommit={commitNumber('age')}
+                />
+              </View>
+              <View style={{ flex: 1, gap: 6 }}>
+                <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Sex</Text>
+                <View style={[styles.segment, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+                  {(['male', 'female'] as const).map((s) => {
+                    const active = body.sex === s;
+                    return (
+                      <Pressable
+                        key={s}
+                        onPress={() => setBody({ sex: s })}
+                        style={[styles.segmentItem, active && { backgroundColor: colors.accent }]}
+                      >
+                        <Text style={[styles.segmentText, { color: active ? '#FFFFFF' : colors.textMuted }]}>
+                          {s === 'male' ? 'Male' : 'Female'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            </View>
             <Text style={[styles.note, { color: colors.textMuted }]}>
-              Used to estimate your walking distance and calories burned.
+              Used to estimate your daily calories burned from weight, height, age and activity.
             </Text>
           </Card>
         </Section>
@@ -226,5 +256,8 @@ const styles = StyleSheet.create({
   suffix: { fontSize: 14, fontWeight: '700', marginLeft: 6 },
   groupTitle: { fontSize: 15, fontWeight: '800', marginBottom: Spacing.two },
   bodyRow: { flexDirection: 'row', gap: Spacing.three },
+  segment: { flexDirection: 'row', borderRadius: Radii.md, borderWidth: StyleSheet.hairlineWidth, padding: 3, height: 48 },
+  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', borderRadius: Radii.sm },
+  segmentText: { fontSize: 14, fontWeight: '700' },
   note: { fontSize: 12, fontWeight: '500', marginTop: Spacing.two },
 });

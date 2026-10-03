@@ -86,6 +86,7 @@ export default function HomeScreen() {
     stepsOverGoal,
     stepGoalPct,
     distanceKm,
+    bmrKcal,
     stepKcal,
     activityKcal,
     totalKcal,
@@ -143,14 +144,15 @@ export default function HomeScreen() {
         />
         <StatCard
           icon="flame-outline"
-          label="Calories burned"
+          label="Calories lost today"
           value={formatInt(totalKcal)}
           unit="kcal"
           tint={colors.fat}
         />
       </View>
       <Text style={[styles.breakdown, { color: colors.textMuted }]}>
-        Estimate from your weight, height and activities · steps {formatInt(stepKcal)} kcal
+        Estimated from your weight, height, age, sex and activity · resting {formatInt(bmrKcal)}
+        {' · '}steps {formatInt(stepKcal)}
         {' · '}activities {formatInt(activityKcal)} kcal
       </Text>
 

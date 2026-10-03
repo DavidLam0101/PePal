@@ -25,6 +25,8 @@ export type Profile = {
 export type Body = {
   weightKg: number;
   heightCm: number;
+  age: number;
+  sex: 'male' | 'female';
 };
 
 export type Goals = {
@@ -138,6 +140,8 @@ function seedState(): AppState {
     body: {
       weightKg: 72,
       heightCm: 175,
+      age: 28,
+      sex: 'male',
     },
     goals: DEFAULT_GOALS,
     week: seedWeek(),
@@ -166,6 +170,8 @@ export type Derived = {
   stepsOverGoal: number;
   stepGoalPct: number;
   distanceKm: number;
+  /** Resting energy per day from weight, height, age and sex (Mifflin-St Jeor). */
+  bmrKcal: number;
   /** Walking energy from distance: ≈ 0.5 kcal per kg per km. */
   stepKcal: number;
   /** Sum of MET × weight × hours for today's logged activities. */
@@ -190,6 +196,10 @@ function deriveFrom(state: AppState): Derived {
   const distanceKm = (todaySteps * strideM) / 1000;
 
   const stepKcal = 0.5 * state.body.weightKg * distanceKm;
+
+  // Resting energy (Mifflin-St Jeor): kcal per day with no activity at all.
+  const { weightKg, heightCm, age, sex } = state.body;
+  const bmrKcal = 10 * weightKg + 6.25 * heightCm - 5 * age + (sex === 'male' ? 5 : -161);
 
   const todayActivities = state.activities.filter((a) => a.date === todayKey);
   const activityKcal = todayActivities.reduce((sum, a) => {
@@ -222,9 +232,10 @@ function deriveFrom(state: AppState): Derived {
     stepsOverGoal: todaySteps - stepGoal,
     stepGoalPct: stepGoal > 0 ? Math.min(100, Math.round((todaySteps / stepGoal) * 100)) : 0,
     distanceKm,
+    bmrKcal,
     stepKcal,
     activityKcal,
-    totalKcal: stepKcal + activityKcal,
+    totalKcal: bmrKcal + stepKcal + activityKcal,
     todayActivities,
     weekDays,
     daysHitThisWeek: weekDays.filter((d) => d.hit).length,

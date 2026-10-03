@@ -1,24 +1,95 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ProgressRing } from '@/components/progress-ring';
 import { Screen } from '@/components/screen';
-import { Card, Section, StatCard } from '@/components/ui';
-import { Spacing, useTheme } from '@/constants/theme';
+import { Sheet } from '@/components/sheet';
+import { Card, PillButton, Section, StatCard } from '@/components/ui';
+import { Radii, Spacing, useTheme } from '@/constants/theme';
+import { ACTIVITY_TYPES, findActivityType } from '@/data/activities';
 import { useAppData } from '@/store/app-data';
 import { formatFixed, formatInt, greeting, todayLabel } from '@/utils/format';
 
+/** Panel to log an activity: pick a type and enter minutes. */
+function LogActivitySheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const { colors } = useTheme();
+  const { addActivity } = useAppData();
+  const [typeId, setTypeId] = useState(ACTIVITY_TYPES[0].id);
+  const [minutesText, setMinutesText] = useState('30');
+
+  const minutes = parseInt(minutesText, 10);
+  const valid = !Number.isNaN(minutes) && minutes > 0 && minutes <= 600;
+
+  const add = () => {
+    if (!valid) return;
+    addActivity(typeId, minutes);
+    setMinutesText('30');
+    onClose();
+  };
+
+  return (
+    <Sheet visible={visible} title="Log activity" onClose={onClose}>
+      <Text style={[styles.sheetLabel, { color: colors.textMuted }]}>Activity</Text>
+      <View style={styles.chipWrap}>
+        {ACTIVITY_TYPES.map((a) => {
+          const active = a.id === typeId;
+          return (
+            <Pressable
+              key={a.id}
+              onPress={() => setTypeId(a.id)}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: active ? colors.accent : colors.surfaceAlt,
+                  borderColor: active ? colors.accent : colors.border,
+                },
+              ]}
+            >
+              <Ionicons name={a.icon} size={16} color={active ? '#FFFFFF' : colors.text} />
+              <Text style={[styles.chipText, { color: active ? '#FFFFFF' : colors.text }]}>{a.name}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Text style={[styles.sheetLabel, { color: colors.textMuted }]}>Minutes</Text>
+      <View style={[styles.minutesBox, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+        <TextInput
+          value={minutesText}
+          onChangeText={(t) => setMinutesText(t.replace(/\D/g, '').slice(0, 3))}
+          keyboardType="number-pad"
+          placeholder="30"
+          placeholderTextColor={colors.textMuted}
+          style={[styles.minutesInput, { color: colors.text }]}
+        />
+        <Text style={[styles.suffix, { color: colors.textMuted }]}>min</Text>
+      </View>
+
+      <PillButton
+        label="Add activity"
+        icon="checkmark"
+        onPress={add}
+        style={{ marginTop: Spacing.four, opacity: valid ? 1 : 0.5 }}
+      />
+    </Sheet>
+  );
+}
+
 export default function HomeScreen() {
   const { colors } = useTheme();
-  const { state, derived } = useAppData();
+  const { state, derived, removeActivity } = useAppData();
+  const [logOpen, setLogOpen] = useState(false);
   const { stepGoal } = state.goals;
   const {
     todaySteps,
     stepsOverGoal,
     stepGoalPct,
     distanceKm,
-    caloriesBurned,
+    stepKcal,
+    activityKcal,
+    totalKcal,
+    todayActivities,
     weekDays,
     daysHitThisWeek,
   } = derived;
@@ -73,11 +144,76 @@ export default function HomeScreen() {
         <StatCard
           icon="flame-outline"
           label="Calories burned"
-          value={formatInt(caloriesBurned)}
+          value={formatInt(totalKcal)}
           unit="kcal"
           tint={colors.fat}
         />
       </View>
+      <Text style={[styles.breakdown, { color: colors.textMuted }]}>
+        Estimate from your weight, height and activities · steps {formatInt(stepKcal)} kcal
+        {' · '}activities {formatInt(activityKcal)} kcal
+      </Text>
+
+      {/* Activities */}
+      <Section
+        title="Activities today"
+        action={
+          <PillButton
+            label="Log activity"
+            icon="add"
+            variant="outline"
+            onPress={() => setLogOpen(true)}
+          />
+        }
+      >
+        {todayActivities.length === 0 ? (
+          <Card style={styles.emptyActivities}>
+            <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+              No activities logged today. Add a run, ride or workout to raise your calorie estimate.
+            </Text>
+          </Card>
+        ) : (
+          <Card style={{ gap: Spacing.three }}>
+            {todayActivities.map((a, i) => {
+              const type = findActivityType(a.typeId);
+              const kcal = type ? type.met * state.body.weightKg * (a.minutes / 60) : 0;
+              return (
+                <View
+                  key={a.id}
+                  style={[
+                    styles.activityRow,
+                    i < todayActivities.length - 1 && {
+                      borderBottomColor: colors.border,
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                >
+                  <View style={[styles.activityIcon, { backgroundColor: colors.accentSoft }]}>
+                    <Ionicons name={type?.icon ?? 'fitness-outline'} size={18} color={colors.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.activityName, { color: colors.text }]}>
+                      {type?.name ?? 'Activity'}
+                    </Text>
+                    <Text style={[styles.activityMeta, { color: colors.textMuted }]}>
+                      {a.minutes} min · {formatInt(kcal)} kcal
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => removeActivity(a.id)}
+                    hitSlop={8}
+                    accessibilityLabel={`Remove ${type?.name ?? 'activity'}`}
+                  >
+                    <Ionicons name="close-circle-outline" size={20} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+              );
+            })}
+          </Card>
+        )}
+      </Section>
+
+      <LogActivitySheet visible={logOpen} onClose={() => setLogOpen(false)} />
 
       {/* Weekly breakdown */}
       <Section
@@ -158,4 +294,32 @@ const styles = StyleSheet.create({
   dayResult: { width: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3 },
   dayYes: { fontSize: 13, fontWeight: '800' },
   dayPct: { fontSize: 13, fontWeight: '700' },
+  breakdown: { fontSize: 12, fontWeight: '600', textAlign: 'center', marginTop: Spacing.two, lineHeight: 17 },
+  emptyActivities: { paddingVertical: Spacing.four },
+  emptyText: { fontSize: 13, fontWeight: '500', textAlign: 'center', lineHeight: 19 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingBottom: Spacing.three },
+  activityIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  activityName: { fontSize: 15, fontWeight: '700' },
+  activityMeta: { fontSize: 12, fontWeight: '500', marginTop: 1 },
+  sheetLabel: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: Spacing.two, marginTop: Spacing.two },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: Radii.pill,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+  },
+  chipText: { fontSize: 13, fontWeight: '700' },
+  minutesBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radii.md,
+    paddingHorizontal: Spacing.three,
+  },
+  minutesInput: { flex: 1, paddingVertical: 12, fontSize: 16, fontWeight: '700' },
+  suffix: { fontSize: 14, fontWeight: '700' },
 });

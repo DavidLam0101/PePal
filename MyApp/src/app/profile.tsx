@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
 import {
@@ -12,7 +13,7 @@ import {
 } from 'react-native';
 
 import { Screen } from '@/components/screen';
-import { Card, ComingSoonModal, Section, useComingSoon } from '@/components/ui';
+import { Card, Section } from '@/components/ui';
 import { Radii, Spacing, useTheme } from '@/constants/theme';
 import { useAppData } from '@/store/app-data';
 
@@ -61,16 +62,21 @@ function TextField({
 function initials(name: string): string {
   return name
     .split(' ')
+    .filter(Boolean)
     .map((p) => p[0])
     .slice(0, 2)
     .join('')
     .toUpperCase();
 }
 
+/** Formats an 11-digit ID as 3-4-4 for readability (e.g. 482 1390 7651). */
+function formatId(id: string): string {
+  return `${id.slice(0, 3)} ${id.slice(3, 7)} ${id.slice(7)}`;
+}
+
 export default function ProfileScreen() {
   const { colors } = useTheme();
-  const soon = useComingSoon();
-  const { state, setName, setId, setBody } = useAppData();
+  const { state, setName, setAvatarUri, setBody } = useAppData();
   const { profile, body } = state;
 
   const commitNumber = (key: 'weightKg' | 'heightCm') => (raw: string) => {
@@ -78,27 +84,38 @@ export default function ProfileScreen() {
     if (!Number.isNaN(n) && n > 0) setBody({ [key]: Math.round(n * 10) / 10 });
   };
 
+  const pickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]?.uri) {
+      setAvatarUri(result.assets[0].uri);
+    }
+  };
+
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={{ flex: 1 }}
-    >
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <Screen title="Profile" subtitle="Account and personal details">
         {/* Identity */}
         <Section title="Profile">
           <Card style={{ gap: Spacing.four }}>
             <View style={styles.avatarRow}>
-              <View style={[styles.avatar, { backgroundColor: colors.accentSoft }]}>
-                {profile.avatarUri ? (
-                  <Image source={{ uri: profile.avatarUri }} style={styles.avatarImg} contentFit="cover" />
-                ) : (
-                  <Text style={[styles.avatarText, { color: colors.accent }]}>
-                    {initials(profile.name || 'PePal')}
-                  </Text>
-                )}
-              </View>
+              <Pressable onPress={pickPhoto} accessibilityLabel="Change profile picture">
+                <View style={[styles.avatar, { backgroundColor: colors.accentSoft }]}>
+                  {profile.avatarUri ? (
+                    <Image source={{ uri: profile.avatarUri }} style={styles.avatarImg} contentFit="cover" />
+                  ) : (
+                    <Text style={[styles.avatarText, { color: colors.accent }]}>
+                      {initials(profile.name || 'PePal')}
+                    </Text>
+                  )}
+                </View>
+              </Pressable>
               <Pressable
-                onPress={() => soon.open('Change profile picture')}
+                onPress={pickPhoto}
                 style={({ pressed }) => [
                   styles.photoBtn,
                   { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
@@ -110,7 +127,26 @@ export default function ProfileScreen() {
             </View>
 
             <TextField label="Name" value={profile.name} onCommit={setName} placeholder="Your name" />
-            <TextField label="ID" value={profile.id} onCommit={setId} placeholder="username" />
+
+            {/* Locked ID — display only */}
+            <View style={styles.field}>
+              <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>ID</Text>
+              <View
+                style={[
+                  styles.inputWrap,
+                  styles.lockedWrap,
+                  { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+                ]}
+              >
+                <Text selectable style={[styles.lockedText, { color: colors.text }]}>
+                  {formatId(profile.id)}
+                </Text>
+                <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
+              </View>
+              <Text style={[styles.note, { color: colors.textMuted }]}>
+                Friends use this 11-digit ID to find you. It can&apos;t be changed.
+              </Text>
+            </View>
           </Card>
         </Section>
 
@@ -143,8 +179,6 @@ export default function ProfileScreen() {
             </Text>
           </Card>
         </Section>
-
-        <ComingSoonModal visible={soon.visible} feature={soon.feature} onClose={soon.close} />
       </Screen>
     </KeyboardAvoidingView>
   );
@@ -181,7 +215,14 @@ const styles = StyleSheet.create({
     borderRadius: Radii.md,
     paddingHorizontal: Spacing.three,
   },
-  input: { flex: 1, paddingVertical: Platform.OS === 'ios' ? 12 : 8, fontSize: 16, fontWeight: '600' },
+  input: {
+    flex: 1,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  lockedWrap: { paddingVertical: 12, justifyContent: 'space-between' },
+  lockedText: { fontSize: 16, fontWeight: '700', letterSpacing: 1 },
   suffix: { fontSize: 14, fontWeight: '700', marginLeft: 6 },
   groupTitle: { fontSize: 15, fontWeight: '800', marginBottom: Spacing.two },
   bodyRow: { flexDirection: 'row', gap: Spacing.three },

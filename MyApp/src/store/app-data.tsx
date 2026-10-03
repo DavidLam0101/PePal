@@ -9,12 +9,15 @@ import React, {
   useState,
 } from 'react';
 
+import { findActivityType } from '@/data/activities';
+
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
 export type Profile = {
   name: string;
+  /** 11-digit ID. Generated once and never editable. */
   id: string;
   avatarUri: string | null;
 };
@@ -48,6 +51,15 @@ export type Friend = {
   lastMessage: string;
 };
 
+export type Activity = {
+  id: string;
+  /** Matches an `ACTIVITY_TYPES` id. */
+  typeId: string;
+  minutes: number;
+  /** YYYY-MM-DD the activity was logged on. */
+  date: string;
+};
+
 export type AppState = {
   profile: Profile;
   body: Body;
@@ -56,11 +68,21 @@ export type AppState = {
   week: Record<string, number>;
   meals: Meal[];
   friends: Friend[];
+  activities: Activity[];
 };
 
 /* ------------------------------------------------------------------ */
-/* Date helpers                                                        */
+/* Helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+export const ID_PATTERN = /^\d{11}$/;
+
+/** Random 11-digit ID; first digit is never 0 so it always has 11 digits. */
+export function generateId11(): string {
+  let id = `${1 + Math.floor(Math.random() * 9)}`;
+  for (let i = 0; i < 10; i++) id += `${Math.floor(Math.random() * 10)}`;
+  return id;
+}
 
 export function dateKey(d: Date): string {
   const y = d.getFullYear();
@@ -97,9 +119,7 @@ const DEFAULT_GOALS: Goals = {
 
 function seedWeek(): Record<string, number> {
   // Plausible history: a few days over goal, a few under, today partial.
-  const sample = [12480, 8230, 10120, 675, 14310, 9450, 6240];
-  // fix an obviously-wrong value (typo guard) then map onto real dates
-  sample[3] = 6750;
+  const sample = [12480, 8230, 10120, 6750, 14310, 9450, 6240];
   const days = lastSevenDays();
   const week: Record<string, number> = {};
   days.forEach((d, i) => {
@@ -112,7 +132,7 @@ function seedState(): AppState {
   return {
     profile: {
       name: 'Alex Carter',
-      id: 'alex.carter',
+      id: generateId11(),
       avatarUri: null,
     },
     body: {
@@ -121,18 +141,9 @@ function seedState(): AppState {
     },
     goals: DEFAULT_GOALS,
     week: seedWeek(),
-    meals: [
-      { id: 'm1', name: 'Greek yogurt & berries', kcal: 320, protein: 24, carb: 38, fat: 8 },
-      { id: 'm2', name: 'Chicken rice bowl', kcal: 640, protein: 46, carb: 72, fat: 16 },
-      { id: 'm3', name: 'Protein shake', kcal: 180, protein: 30, carb: 6, fat: 3 },
-      { id: 'm4', name: 'Almonds (handful)', kcal: 170, protein: 6, carb: 6, fat: 15 },
-    ],
-    friends: [
-      { id: 'f1', name: 'Jordan Lee', avatarUri: null, lastMessage: 'See you at the gym at 6?' },
-      { id: 'f2', name: 'Sam Rivera', avatarUri: null, lastMessage: 'New PR today 💪' },
-      { id: 'f3', name: 'Priya Nair', avatarUri: null, lastMessage: 'Sent you a workout plan' },
-      { id: 'f4', name: 'Chris Obi', avatarUri: null, lastMessage: 'Thanks for the tips!' },
-    ],
+    meals: [],
+    friends: [],
+    activities: [],
   };
 }
 
@@ -155,7 +166,12 @@ export type Derived = {
   stepsOverGoal: number;
   stepGoalPct: number;
   distanceKm: number;
-  caloriesBurned: number;
+  /** Walking energy from distance: ≈ 0.5 kcal per kg per km. */
+  stepKcal: number;
+  /** Sum of MET × weight × hours for today's logged activities. */
+  activityKcal: number;
+  totalKcal: number;
+  todayActivities: Activity[];
   weekDays: WeekDay[];
   daysHitThisWeek: number;
   consumedKcal: number;
@@ -169,12 +185,17 @@ function deriveFrom(state: AppState): Derived {
   const todaySteps = state.week[todayKey] ?? 0;
   const { stepGoal } = state.goals;
 
-  // Stride length (m) ≈ height(cm) * 0.415 / 100. Distance in km.
+  // Stride length (m) ≈ height(cm) × 0.415 / 100. Distance in km.
   const strideM = (state.body.heightCm * 0.415) / 100;
   const distanceKm = (todaySteps * strideM) / 1000;
 
-  // Rough walking burn: ~0.045 kcal per step for a 70 kg person, scaled by weight.
-  const caloriesBurned = todaySteps * 0.045 * (state.body.weightKg / 70);
+  const stepKcal = 0.5 * state.body.weightKg * distanceKm;
+
+  const todayActivities = state.activities.filter((a) => a.date === todayKey);
+  const activityKcal = todayActivities.reduce((sum, a) => {
+    const met = findActivityType(a.typeId)?.met ?? 0;
+    return sum + met * state.body.weightKg * (a.minutes / 60);
+  }, 0);
 
   const weekDays: WeekDay[] = lastSevenDays().map((date) => {
     const key = dateKey(date);
@@ -201,7 +222,10 @@ function deriveFrom(state: AppState): Derived {
     stepsOverGoal: todaySteps - stepGoal,
     stepGoalPct: stepGoal > 0 ? Math.min(100, Math.round((todaySteps / stepGoal) * 100)) : 0,
     distanceKm,
-    caloriesBurned,
+    stepKcal,
+    activityKcal,
+    totalKcal: stepKcal + activityKcal,
+    todayActivities,
     weekDays,
     daysHitThisWeek: weekDays.filter((d) => d.hit).length,
     consumedKcal,
@@ -220,12 +244,16 @@ type AppDataContextValue = {
   state: AppState;
   derived: Derived;
   setName: (name: string) => void;
-  setId: (id: string) => void;
   setAvatarUri: (uri: string | null) => void;
   setBody: (patch: Partial<Body>) => void;
   setDaySteps: (key: string, steps: number) => void;
   addMeal: (meal: Omit<Meal, 'id'>) => void;
   removeMeal: (id: string) => void;
+  /** Returns false if the user is already a friend or tries to add themself. */
+  addFriend: (user: { id: string; name: string; avatarUri: string | null }) => boolean;
+  clearFriends: () => void;
+  addActivity: (typeId: string, minutes: number) => void;
+  removeActivity: (id: string) => void;
   resetAll: () => void;
 };
 
@@ -246,16 +274,22 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (!cancelled && raw) {
           const parsed = JSON.parse(raw) as Partial<AppState>;
-          setState((prev) => ({
-            ...prev,
-            ...parsed,
-            profile: { ...prev.profile, ...parsed.profile },
-            body: { ...prev.body, ...parsed.body },
-            goals: { ...prev.goals, ...parsed.goals },
-            week: { ...prev.week, ...parsed.week },
-            meals: parsed.meals ?? prev.meals,
-            friends: parsed.friends ?? prev.friends,
-          }));
+          setState((prev) => {
+            const storedId = parsed.profile?.id;
+            // Migrate older IDs (e.g. "alex.carter") to a valid 11-digit ID.
+            const id = storedId && ID_PATTERN.test(storedId) ? storedId : generateId11();
+            return {
+              ...prev,
+              ...parsed,
+              profile: { ...prev.profile, ...parsed.profile, id },
+              body: { ...prev.body, ...parsed.body },
+              goals: { ...prev.goals, ...parsed.goals },
+              week: { ...prev.week, ...parsed.week },
+              meals: parsed.meals ?? prev.meals,
+              friends: parsed.friends ?? prev.friends,
+              activities: parsed.activities ?? prev.activities,
+            };
+          });
         }
       } catch {
         // ignore corrupt storage, fall back to seed
@@ -279,10 +313,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const setName = useCallback((name: string) => {
     setState((s) => ({ ...s, profile: { ...s.profile, name } }));
-  }, []);
-
-  const setId = useCallback((id: string) => {
-    setState((s) => ({ ...s, profile: { ...s.profile, id } }));
   }, []);
 
   const setAvatarUri = useCallback((avatarUri: string | null) => {
@@ -311,6 +341,41 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, meals: s.meals.filter((m) => m.id !== id) }));
   }, []);
 
+  const addFriend = useCallback<AppDataContextValue['addFriend']>(
+    (user) => {
+      // Check against the current snapshot synchronously so the caller gets an answer.
+      if (user.id === state.profile.id) return false;
+      if (state.friends.some((f) => f.id === user.id)) return false;
+      setState((s) => ({
+        ...s,
+        friends: [
+          ...s.friends,
+          { id: user.id, name: user.name, avatarUri: user.avatarUri, lastMessage: 'Say hi 👋' },
+        ],
+      }));
+      return true;
+    },
+    [state.profile.id, state.friends],
+  );
+
+  const clearFriends = useCallback(() => {
+    setState((s) => ({ ...s, friends: [] }));
+  }, []);
+
+  const addActivity = useCallback((typeId: string, minutes: number) => {
+    setState((s) => ({
+      ...s,
+      activities: [
+        ...s.activities,
+        { id: `a${Date.now()}`, typeId, minutes, date: dateKey(new Date()) },
+      ],
+    }));
+  }, []);
+
+  const removeActivity = useCallback((id: string) => {
+    setState((s) => ({ ...s, activities: s.activities.filter((a) => a.id !== id) }));
+  }, []);
+
   const resetAll = useCallback(() => {
     setState(seedState());
   }, []);
@@ -323,15 +388,33 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       state,
       derived,
       setName,
-      setId,
       setAvatarUri,
       setBody,
       setDaySteps,
       addMeal,
       removeMeal,
+      addFriend,
+      clearFriends,
+      addActivity,
+      removeActivity,
       resetAll,
     }),
-    [ready, state, derived, setName, setId, setAvatarUri, setBody, setDaySteps, addMeal, removeMeal, resetAll],
+    [
+      ready,
+      state,
+      derived,
+      setName,
+      setAvatarUri,
+      setBody,
+      setDaySteps,
+      addMeal,
+      removeMeal,
+      addFriend,
+      clearFriends,
+      addActivity,
+      removeActivity,
+      resetAll,
+    ],
   );
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
